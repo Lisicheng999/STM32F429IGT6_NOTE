@@ -31,7 +31,7 @@ gcc -D<宏名> file.c -o file
 --cpu Cortex-M4.fp.sp *.o 
 --library_type=microlib --strict --scatter "FreeRTOS_Test\FreeRTOS_Test.sct" 
 
-### 不适用Microlibc
+### 不启用Microlibc (删除-D__MICROLIB)
 --c99 -c --cpu Cortex-M4.fp.sp -D__EVAL -g -O3 --apcs=interwork --split_sections -I ../Core/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc -I ../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy -I ../Middlewares/Third_Party/FreeRTOS/Source/include -I ../Middlewares/Third_Party/FreeRTOS/Source/CMSIS_RTOS_V2 -I ../Middlewares/Third_Party/FreeRTOS/Source/portable/RVDS/ARM_CM4F -I ../Drivers/CMSIS/Device/ST/STM32F4xx/Include -I ../Drivers/CMSIS/Include
 -I./RTE/_FreeRTOS_Test
 -ID:/Local/Arm/Packs/ARM/CMSIS/6.1.0/CMSIS/Core/Include
@@ -173,14 +173,4 @@ gcc -D<宏名> file.c -o file
   - `USE_HAL_DRIVER`：启用 HAL 驱动支持。
 
 ---
-
-### **总结**
-这段编译和链接选项展示了一个典型的基于 STM32F429 的嵌入式项目，使用了：
-- **C99 标准**：确保现代 C 功能支持。
-- **FreeRTOS**：提供实时操作系统功能。
-- **HAL 驱动**：抽象底层硬件操作。
-- **ARM Microlib**：小型库优化内存占用。
-- **Scatter 文件**：明确内存分布。
-
-这样的配置非常适合资源受限的嵌入式开发项目，同时支持高性能处理。
 

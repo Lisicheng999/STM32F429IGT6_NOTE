@@ -105,12 +105,19 @@ CONFIG_DRM_VIRTIO_GPU: 启用 VirtIO GPU 支持，允许在虚拟机中使用图
 
 15. chroot .  # 进入当前文件，或者替换为根文件系统路径，因为挂载了根文件系统到kernerl_img, 直接在这个目录编辑
 adduser user
+
 passwd 修改root密码
+
 adduser username sudo  添加到sudo组
+
 groups username  查看username是否在用户组
+
 su - username  切换到用户并测试 sudo 
+
 退出chroot 环境
+
 exit 
+
 exit (刚刚使用su - username 测试，exit两次退到原本的环境)
 
 卸载映像
@@ -120,6 +127,7 @@ exit (刚刚使用su - username 测试，exit两次退到原本的环境)
 
 
 启动qemu, 指定内核镜像和磁盘镜像
+
 qemu-system-x86_64 \
   -drive file=kernel.img,format=raw \
   -m 1024 \
@@ -127,7 +135,9 @@ qemu-system-x86_64 \
   -kernel bzImage \
   -append "root=/dev/sda rw console=ttyS0" \
   -nographic
+
 或
+
 qemu-system-x86_64 \
   -hda kernel.img \
   -m 1024 \
@@ -145,3 +155,143 @@ egrep -c '(vmx|svm)' /proc/cpuinfo # 检查CPU是否支持虚拟化
 
 
 ###
+
+## 制作内核的硬盘镜像并启动QEMU
+
+### 1. 创建硬盘镜像并分区
+```bash
+# 创建100MB的空白镜像
+dd if=/dev/zero of=hd.img bs=1M count=100
+
+# 分区镜像（使用fdisk创建单个可启动分区）
+echo -e "n\np\n1\n\n\na\nw" | fdisk hd.img
+
+# 设置loop设备
+sudo losetup -Pf --show hd.img > loopdev
+LOOPDEV=$(cat loopdev) && echo "使用loop设备: $LOOPDEV"
+
+# 格式化分区为ext2
+sudo mkfs.ext2 ${LOOPDEV}p1
+```
+
+### 2. 安装GRUB2到镜像
+```bash
+# 挂载分区
+sudo mount ${LOOPDEV}p1 /mnt/rootfs
+
+# 创建GRUB目录结构
+sudo mkdir -p /mnt/rootfs/boot/grub
+
+# 安装GRUB到MBR
+sudo grub-install \
+    --target=i386-pc \
+    --boot-directory=/mnt/boot \
+    --modules="ext2 part_msdos" \
+    $LOOPDEV
+
+# 创建GRUB配置文件
+sudo tee /mnt/rootfs/boot/grub/grub.cfg << 'EOF'
+menuentry "My Linux" {
+    insmod ext2
+    set root=(hd0,msdos1)
+    linux /boot/bzImage root=/dev/sda1 console=ttyS0
+}
+EOF
+
+# 复制内核到/boot目录
+sudo cp bzImage /mnt/rootfs/boot/
+```
+
+### 3. 创建最小根文件系统
+使用debootstrap 直接制作必要的工具
+
+格式
+```bash
+sudo debootstrap [发行版代号] [目标目录] [镜像地址]
+```
+
+指定为debian软件
+```bash
+sudo debootstrap stable /mnt/rootfs \
+http://deb.debian.org/debian
+```
+指定为ubuntu软件
+```bash
+sudo debootstrap focal /mnt/rootfs \
+http://archive.ubuntu.com/ubuntu/
+```
+
+```bash
+
+# 创建初始化脚本
+# 创建基本目录结构
+sudo mkdir -p /mnt/{bin,dev,etc,proc,sys}
+
+# 复制静态版busybox
+sudo cp busybox-x86_64 /mnt/bin/busybox
+sudo chmod +x /mnt/bin/busybox
+
+# 创建初始化脚本（保持不变）
+sudo tee /mnt/rootfs/init << 'EOF'
+#!/bin/busybox sh
+mount -t proc none /proc
+mount -t sysfs none /sys
+mount -t devtmpfs devtmpfs /dev
+exec /bin/busybox sh
+EOF
+sudo chmod +x /mnt/init
+
+# 创建符号链接
+sudo ln -s busybox /mnt/bin/sh
+```
+
+### 4. 卸载并清理
+```bash
+sudo umount /mnt
+sudo losetup -d $LOOPDEV
+rm loopdev
+```
+
+### 5. 启动QEMU测试
+```bash
+qemu-system-x86_64 \
+    -nographic \
+    -drive file=hd.img,format=raw \
+    -serial mon:stdio \
+    -append "console=ttyS0 init=/init"
+```
+
+
+在 chroot 环境中执行以下命令
+```bash
+sudo chroot /mnt/rootfs
+passwd  # 设置 root 密码
+apt-get update
+apt-get install vim bash-completion  # 安装一些基础包
+```
+
+### 关键说明：
+1. **分区布局**：使用单个主分区，格式化为ext2文件系统
+2. **GRUB安装**：需要指定正确的目标架构（i386-pc）和boot目录
+3. **根文件系统**：
+   - 包含静态编译的busybox作为基础工具
+   - 简单的init脚本挂载关键文件系统
+   - 必须包含`/dev`目录和设备节点（本示例使用devtmpfs自动创建）
+4. **内核参数**：
+   - `root=/dev/sda1` 指定根分区
+   - `console=ttyS0` 将控制台输出重定向到串口
+   - `init=/init` 指定自定义初始化脚本
+
+### 注意事项：
+1. 确保内核编译时包含以下配置：
+   ```config
+   CONFIG_BLK_DEV_SD=y
+   CONFIG_EXT2_FS=y
+   CONFIG_SERIAL_8250=y
+   CONFIG_SERIAL_8250_CONSOLE=y
+   ```
+2. 如果使用UEFI启动，需要改用`x86_64-efi`目标并创建ESP分区
+3. 可以通过`genext2fs`工具直接生成文件系统镜像（无需手动挂载）：
+   ```bash
+   genext2fs -b 1024 -d rootfs/ hd.img
+   ```
