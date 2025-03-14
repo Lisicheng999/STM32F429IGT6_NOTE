@@ -615,3 +615,89 @@ NVIC->ISER[2]|=(1<< 5); // 使能中断组2中的第6个中 这行代码通过NV
 3. 我们通过结构体操作这些寄存器,然后编译器会将其映射到实际的物理地址上。
 4. 这些寄存器的具体地址将在MCU的外设地址映射中指定,我们可以在IDE的Memap窗口中查看。
 5. 所以结构体更像是一个逻辑上的抽象,将NVIC的寄存器方便地集成在一起,在程序中按功能管理和访问。
+
+
+## CubeIDE 编译参数
+arm-none-eabi-gcc
+arm-none-eabi-size
+arm-none-eabi-objdump
+
+### 不包含FreeRTOS, Release 
+在Compiler和Assembler参数中
+
+- Debug相对增加内容: -g3 -DDEBUG 
+- 改变:-Os -> -O0
+
+- ` Compiler `
+```
+-mcpu=cortex-m4 -std=gnu11 -DUSE_HAL_DRIVER -DSTM32F429xx -c \
+-I../Core/Inc \
+-I../Drivers/STM32F4xx_HAL_Driver/Inc \
+-I../Drivers/STM32F4xx_HAL_Driver/Inc/Legacy \ 
+-I../Drivers/CMSIS/Device/ST/STM32F4xx/Include \
+-I../Drivers/CMSIS/Include \
+-Os -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity --specs=nano.specs \ -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb \
+```
+- ` Assembler `
+```
+-mcpu=cortex-m4 -c -x assembler-with-cpp --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb
+```
+
+- ` Linker `
+```
+-mcpu=cortex-m4 -T"D:\Projects\CubeIDE\F429IGT6\STM32F429IGTX_FLASH.ld" \
+--specs=nosys.specs -Wl,-Map="${BuildArtifactFileBaseName}.map" -Wl,--gc-sections -static \
+--specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -Wl,--start-group -lc -lm -Wl,--end-group
+```
+
+解读：
+‌一、编译器参数（Compiler Flags）‌
+|        ‌参数‌	‌| 作用‌	|‌ 技术细节‌|
+|---|---|---|
+|-mcpu=cortex-m4	|指定目标CPU为ARM Cortex-M4架构	|生成针对M4指令集优化的机器码，启用Thumb-2指令集。|
+|-std=gnu11	|使用GNU扩展的C11语言标准	|支持C11特性（如匿名结构体）和GNU扩展语法（如__attribute__）。|
+|-DUSE_HAL_DRIVER	|定义宏USE_HAL_DRIVER，启用STM32 HAL库	|用于条件编译HAL库代码（如stm32f4xx_hal.h中通过#ifdef USE_HAL_DRIVER控制代码生成）。|
+|-DSTM32F429xx	|定义芯片型号宏，指定具体STM32型号	|驱动代码中通过此宏选择正确的寄存器定义和时钟配置。|
+|-I../Core/Inc 等路径	|添加头文件搜索路径	|确保编译器能找到用户代码、HAL库及CMSIS内核文件。|
+|-O0	|禁用编译优化	|调试时常用，保留所有变量和代码逻辑，但生成代码体积大、运行效率低。|
+|-ffunction-sections	|将每个函数编译到独立段（section）	|结合链接器的--gc-sections，移除未使用的函数以减小固件体积（Dead Code Elimination）。|
+|-fdata-sections	|将全局/静态变量分配到独立段	|同上，优化数据段占用空间。|
+|-Wall	|启用所有警告提示	|帮助捕捉潜在代码问题（如未使用变量、类型不匹配）。|
+|-fstack-usage	|生成堆栈使用报告文件（.su）	|分析函数调用时的最大栈深度，避免栈溢出。|
+|-fcyclomatic-complexity	|生成代码圈复杂度报告	|量化函数逻辑复杂度，辅助代码重构。|
+|--specs=nano.specs	|使用newlib-nano标准C库	|减少库函数的内存占用（如printf简化为iprintf），适用于资源受限的嵌入式系统。|
+|-mfpu=fpv4-sp-d16	|启用Cortex-M4的硬件单精度浮点单元（FPU）	指定FPU版本为VFPv4，支持单精度浮点运算。|
+|-mfloat-abi=hard	|使用硬件浮点ABI	|浮点运算直接通过FPU寄存器传递，提升性能（需芯片支持硬件FPU）。|
+|-mthumb	|生成Thumb指令集代码 |Thumb指令集密度高，节省Flash空间。|
+--- 
+
+二、汇编器参数（Assembler Flags）‌
+|‌参数‌	|‌作用‌	|‌技术细节‌|
+|---|---|---|
+|-x assembler-with-cpp	|启用汇编文件中的C预处理器功能	|允许在汇编代码中使用#include和宏定义。|
+|-mcpu=cortex-m4	|同编译器参数，确保汇编代码与目标CPU匹配。	汇编器根据CPU架构校验指令合法性。|
+|--specs=nano.specs	|同编译器参数，保持库一致性。| 
+---
+
+三、链接器参数（Linker Flags）‌
+|‌参数‌	|‌作用‌	|‌技术细节‌|
+|---|---|---|
+|-T"STM32F429IGTX_FLASH.ld"	|指定链接脚本文件	|定义内存布局（Flash/ROM、RAM地址分配）、段（.text, .data, .bss）的链接规则。|
+|--specs=nosys.specs	|禁用操作系统相关系统调用	|裸机环境下无需系统调用（如_sbrk），避免链接错误。|
+|-Wl,-Map="...map"	|生成内存映射文件（.map）	|分析各段占用空间、符号地址及内存利用率。|
+|-Wl,--gc-sections	|移除未使用的段	|需配合编译器的-ffunction-sections和-fdata-sections使用，显著减小固件体积。|
+|-static	强制静态链接	|不依赖动态库，所有库函数直接嵌入可执行文件。|
+|-Wl,--start-group ... -Wl,--end-group	|处理库依赖循环	|确保-lc（标准C库）和-lm（数学库）之间的交叉引用可正确解析。|
+|-lc -lm	|链接标准C库和数学库	|即使未显式调用math.h中的函数，HAL库可能隐式依赖数学运算（如浮点运算）。|
+---
+
+四、关键配置一致性检查‌
+‌硬件FPU一致性‌
+
+编译器、汇编器、链接器均需配置-mfpu=fpv4-sp-d16和-mfloat-abi=hard，确保浮点运算通过硬件加速，避免ABI不匹配导致的崩溃或性能问题。
+‌指令集一致性‌
+
+-mcpu=cortex-m4和-mthumb在所有阶段保持一致，防止生成混合ARM/Thumb指令。
+‌库规格一致性‌
+
+编译器与链接器均使用--specs=nano.specs，避免标准库函数的行为或内存占用不一致。
